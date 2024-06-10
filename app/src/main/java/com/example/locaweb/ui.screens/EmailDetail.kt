@@ -59,13 +59,13 @@ fun EmailDetailScreen(goBack: () -> Unit, content: IEmail) {
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = { /*TODO*/ }) {
+                IconButton(onClick = {}) {
                     Icon(painter = painterResource(R.drawable.ic_archive), contentDescription = "archive")
                 }
-                IconButton(onClick = { /*TODO*/ }) {
+                IconButton(onClick = {}) {
                     Icon(painter = painterResource(R.drawable.ic_delete), contentDescription = "delete")
                 }
-                IconButton(onClick = { /*TODO*/ }) {
+                IconButton(onClick = {}) {
                     Icon(painter = painterResource(R.drawable.ic_answer), contentDescription = "answer")
                 }
             }
