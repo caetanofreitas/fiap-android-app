@@ -1,113 +1,199 @@
 package com.example.locaweb.view.models
 
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.locaweb.database.DBHandler
+import com.example.locaweb.database.EmailDbHandler
+import com.example.locaweb.integrations.ApiService
+import com.example.locaweb.integrations.GetEmailsFilters
+import com.example.locaweb.integrations.SendEmailBody
+import com.example.locaweb.integrations.UserPreferences
 import com.example.locaweb.interfaces.IEmail
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.forEach
+import kotlinx.coroutines.flow.toSet
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import java.time.LocalDateTime
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
-data class FilterState(
-    var date: LocalDateTime? = null,
-    var notReadFilter: Boolean = false,
-    var withStarFilter: Boolean = false,
-    var importantFilter: Boolean = false,
-    var archivedFilter: Boolean = false,
-    var markers: List<String> = emptyList(),
-)
+class EmailViewModel(
+    private val context: Context,
+    private val apiService: ApiService,
+    private val accessModel: AccessViewModel
+): ViewModel() {
+    private val emailDbHandler: EmailDbHandler = EmailDbHandler(context)
 
-class EmailViewModel(context: Context): ViewModel() {
-    private val _emails = MutableStateFlow(emptyList<IEmail>())
-    val emails =_emails.asStateFlow()
+    private val _emails = MutableStateFlow<List<IEmail>>(emptyList())
+    val emails = _emails.asStateFlow()
 
-    private val dbHandler: DBHandler = DBHandler(context)
-
-    private val _filters = MutableStateFlow(FilterState())
-    val filter = _filters.asStateFlow()
+    private val _selectedEmail = MutableStateFlow<IEmail?>(null)
+    val selectedEmail = _selectedEmail.asStateFlow()
 
     private val _markersList = MutableStateFlow(emptyList<String>())
     val markers = _markersList.asStateFlow()
+
+    private val _requestParams = MutableStateFlow(GetEmailsFilters())
+    val filter = _requestParams.asStateFlow()
+
+    private var startup = true
 
     init {
         loadData()
     }
 
-    private fun loadData() {
-        dbHandler.addNewEmail(
-            IEmail(
-                imageUrl = "https://picsum.photos/1080",
-                sender = "Locaweb",
-                subject = "Garanta sua Hospedagem",
-                date = LocalDateTime.now(),
-                content = "<h1>Olá senhor(a), email teste</h1>",
-                preview = "Lorem ipsum dolor sit amet consectetur. Nec elit laculis nibgh send dolor felis rhocus. Sed. Lorem ipsum dolor sit amet consectetur. Nec elit laculis nibgh send dolor felis rhocus. Sed.",
-                isFavorite = false,
+    private fun loadData() = runBlocking {
+        viewModelScope.launch {
+            val user = accessModel.verifyUserInfo()
+
+            if (user?.userPreferences != null && startup) {
+                startup = false
+                _requestParams.value = GetEmailsFilters(
+                    read = if (user.userPreferences?.isNotReadActive == true) false else null,
+                    favorite = user.userPreferences?.isFavoritesActive,
+                    archived = user.userPreferences?.isArchivedActive,
+                )
+                _markersList.value = user.userPreferences!!.markers!!.toList()
+            }
+
+            val emailsResponse = apiService.getEmails(
+                date = _requestParams.value.date,
+                markers = _requestParams.value.markers,
+                read = _requestParams.value.read,
+                favorite = _requestParams.value.favorite,
+                importants = _requestParams.value.importants,
+                archived = _requestParams.value.archived,
+                search = _requestParams.value.search,
+                page = _requestParams.value.page,
+                limit = _requestParams.value.limit,
             )
-        )
-        val loadedElement = dbHandler.readEmails()
-        _emails.value = loadedElement
-        _markersList.value = listOf("Marcadores", "Social", "Brachfast", "Financeiro", "Cursos", "Atualizações", "Gym", "Promoções", "Faculdade ADS", "Stream", "Outro Marcador")
-    }
-
-    private fun updateDb(email: IEmail) {
-        dbHandler.updateEmail(email)
-    }
-
-    fun toggleFavorite(emailId: String, newState: Boolean) {
-        _emails.value = _emails.value.map {
-            if (it.id == emailId) {
-                val updatedEmail = it.copy(isFavorite = newState)
-                updateDb(updatedEmail)
-                updatedEmail
+            if (emailsResponse.isSuccessful) {
+                val apiEmails = emailsResponse.body()?.items?.toList()
+                val emailsList = apiEmails?.map{
+                    IEmail(
+                        id = it.id,
+                        imageUrl = it.sender_id.profile_picture,
+                        sender = it.sender_id.name,
+                        subject = it.content.subject,
+                        date = convertToDate(it.send_date),
+                        preview = it.content.preview,
+                        isFavorite = it.favorite,
+                        markers = it.markers,
+                    )
+                } ?: emptyList()
+                _emails.value = emailsList.ifEmpty { emailDbHandler.readEmails() }
             } else {
-                it
+                val loadedElement = emailDbHandler.readEmails()
+                _emails.value = loadedElement
             }
         }
     }
 
-    fun findById(emailId: String): IEmail? {
-        return _emails.value.firstOrNull { it.id == emailId }
+    private fun convertToDate(date: String): LocalDateTime {
+        val zonedDateTime = ZonedDateTime.parse(date, DateTimeFormatter.ISO_DATE_TIME)
+        return zonedDateTime.toLocalDateTime()
+    }
+
+    private fun updateDb(email: IEmail) {
+        emailDbHandler.updateEmail(email)
+    }
+
+    fun toggleFavorite(emailId: String, newState: Boolean) {
+        viewModelScope.launch {
+            val res = apiService.toggleFavorite(emailId)
+            if (res.isSuccessful) {
+                    var listCopy = _emails.value
+                    _emails.value = emptyList()
+                    delay(1)
+                    listCopy = listCopy.map {
+                        val email = it.copy()
+                        if (email.id == emailId) {
+                            email.isFavorite = newState
+                            updateDb(email)
+                        }
+                        email
+                    }
+                    _emails.value = listCopy
+            }
+        }
+    }
+
+    fun findById(emailId: String) {
+        viewModelScope.launch {
+            try {
+                val res = apiService.getEmailDetail(emailId)
+                if (res.isSuccessful) {
+                    val email = res.body()
+                    var foundInList = _emails.value.firstOrNull { it.id == emailId }
+                    if (foundInList == null) {
+                        foundInList = IEmail(
+                            id = emailId,
+                            imageUrl = "",
+                            sender = "",
+                            subject = email?.content?.subject ?: "",
+                            date = (email?.send_date ?: LocalDateTime.now()) as LocalDateTime,
+                            content = "",
+                            preview = "",
+                            isFavorite = email?.favorite ?: false,
+                            markers = email?.markers,
+                        )
+                    }
+                    foundInList.content = email?.content?.content ?: ""
+                    _selectedEmail.value = foundInList
+                } else {
+                    _selectedEmail.value = null
+                }
+            } catch (e: Exception) {
+                _selectedEmail.value = null
+            }
+        }
     }
 
     fun filterBySearch(search: String) {
+        _requestParams.value.search = search
         loadData()
-        if (search.isBlank()) {
-            return
-        }
-        val searchResult = _emails.value.filter { email ->
-            email.subject.contains(search, ignoreCase = true) ||
-                    email.sender.contains(search, ignoreCase = true)
-        }
-        _emails.value = searchResult
     }
 
     fun restartState() {
+        _requestParams.value = GetEmailsFilters()
         loadData()
-        _filters.value = FilterState()
     }
 
-    fun filterList(filterState: FilterState) {
+    fun filterList(filterState: GetEmailsFilters) {
+        _requestParams.value = filterState
         loadData()
-        _filters.value = filterState
-        val searchResult = _emails.value.filter { email ->
-            val dateFilterPassed = filterState.date?.let { email.date.isEqual(it) || email.date.isAfter(it) } ?: true
+    }
 
-            val notReadFilterPassed = !filterState.notReadFilter || email.isFavorite
+    fun sendEmail(body: SendEmailBody) {
+        viewModelScope.launch {
+            apiService.sendEmail(body)
 
-            val withStarFilterPassed = !filterState.withStarFilter || email.isFavorite
-
-            val importantFilterPassed = !filterState.importantFilter || email.isFavorite
-
-            val archivedFilterPassed = !filterState.archivedFilter || email.isFavorite
-
-            val markersFilterPassed = filterState.markers.isEmpty() || (email.markers?.any { v -> v in filterState.markers } ?: true)
-
-            dateFilterPassed && notReadFilterPassed && withStarFilterPassed && importantFilterPassed && archivedFilterPassed && markersFilterPassed
         }
-        _emails.value = searchResult
+    }
+
+    fun addToList(newItem: String) {
+        _markersList.value = _markersList.value + newItem
+        saveUserParams()
+    }
+
+    fun removeFromList(item: String) {
+        _markersList.value = _markersList.value.filter { it != item }
+        saveUserParams()
+    }
+
+    fun saveUserParams() {
+        viewModelScope.launch {
+            apiService.updateInfo(UserPreferences(
+                is_not_read_active = _requestParams.value.read ?: false,
+                is_favorites_active = _requestParams.value.favorite ?: false,
+                is_archived_active = _requestParams.value.archived ?: false,
+                color_mode = "light",
+                markers = _markersList.value.toTypedArray(),
+            ))
+        }
     }
 }

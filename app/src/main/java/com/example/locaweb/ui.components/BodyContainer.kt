@@ -2,17 +2,16 @@ package com.example.locaweb.ui.components
 
 import android.annotation.SuppressLint
 import android.os.Build
+import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.BottomAppBarDefaults
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FabPosition
@@ -22,8 +21,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,7 +36,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -48,6 +49,8 @@ import com.example.locaweb.ui.screens.CalendarScreen
 import com.example.locaweb.ui.screens.EmailDetailScreen
 import com.example.locaweb.ui.screens.HomeScreen
 import com.example.locaweb.ui.screens.NewEmailScreen
+import com.example.locaweb.ui.screens.ProfileScreen
+import com.example.locaweb.view.models.AccessViewModel
 import com.example.locaweb.view.models.CalendarViewModel
 import com.example.locaweb.view.models.EmailViewModel
 import kotlinx.coroutines.launch
@@ -58,7 +61,8 @@ import java.time.LocalDateTime
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BodyContainer(
-    calendarViewModel: CalendarViewModel,
+    calendarViewModel: CalendarViewModel = viewModel(),
+    viewModel: AccessViewModel = viewModel(),
     emailViewModel: EmailViewModel = viewModel(),
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -89,9 +93,24 @@ fun BodyContainer(
         navController.navigateUp()
     }
 
+    if (sheetState.isVisible) {
+        ModalBottomSheet(
+            sheetState = sheetState,
+            onDismissRequest = { scope.launch { sheetState.hide() } },
+            shape = BottomSheetDefaults.ExpandedShape
+        ) {
+            NewEmailScreen(handleCloseModal) {
+                if (it.to != "") {
+                    handleCloseModal()
+                    emailViewModel.sendEmail(it)
+                }
+            }
+        }
+    }
+
     Scaffold(
         floatingActionButton = {
-            if (activeScreen != "emailDetail") {
+            if (activeScreen != "emailDetail" && activeScreen != "profile") {
                 Navbar(
                     tonalElevation = 8.dp,
                 ) {
@@ -112,7 +131,7 @@ fun BodyContainer(
                         ) {
                             Icon(
                                 painter = painterResource(R.drawable.ic_inbox),
-                                contentDescription = "Tela 1",
+                                contentDescription = "Home",
                                 modifier = Modifier.size(24.dp),
                                 tint = if (activeScreen == "home") Color(0xFFFF0142) else Color(0xFF20313C)
                             )
@@ -127,7 +146,7 @@ fun BodyContainer(
                         ) {
                             Icon(
                                 painter = painterResource(R.drawable.ic_pencil),
-                                contentDescription = "Tela 1",
+                                contentDescription = "Novo Email",
                                 modifier = Modifier.size(24.dp),
                                 tint = if (activeScreen == "write") Color(0xFFFF0142) else Color(0xFF20313C)
                             )
@@ -142,7 +161,7 @@ fun BodyContainer(
                         ) {
                             Icon(
                                 painter = painterResource(R.drawable.ic_calendar),
-                                contentDescription = "Tela 2",
+                                contentDescription = "Calendário",
                                 modifier = Modifier.size(24.dp),
                                 tint = if (activeScreen == "calendar") Color(0xFFFF0142) else Color(0xFF20313C)
                             )
@@ -153,13 +172,48 @@ fun BodyContainer(
         },
         floatingActionButtonPosition = FabPosition.Center
     ) {_ ->
+        val emailList by emailViewModel.emails.collectAsState()
+        Log.d("BodyContainer", "email list: $emailList")
+
         Surface(modifier = Modifier
             .padding(24.dp, 16.dp, 24.dp, 0.dp)
             .fillMaxWidth(), color = MaterialTheme.colorScheme.background) {
             NavHost(navController = navController, startDestination =  "home") {
                 composable(route = "home") {
                     activeScreen = "home"
-                    HomeScreen(navController, emailViewModel)
+                    HomeScreen(
+                        navController = navController,
+                        toggleFavorite = { s, b ->
+                            emailViewModel.toggleFavorite(s, b)
+                        },
+                        emailList = emailList,
+                        searchFilter = { s -> emailViewModel.filterBySearch(s) },
+                        markersList = emailViewModel.markers.collectAsState(),
+                        filterEmails = emailViewModel.filter,
+                        restartEmailFilter = { emailViewModel.restartState() },
+                        filterEmailList = { p -> emailViewModel.filterList(p) },
+                        profileImage = viewModel.loggedUser.value?.profilePicture ?: ""
+                    )
+                }
+
+                composable(route = "profile") {
+                    activeScreen = "profile"
+                    ProfileScreen(
+                        navController = navController,
+                        user = viewModel.loggedUser.collectAsState().value!!,
+                        doLogout = { viewModel.doLogout() },
+                        markers = emailViewModel.markers.collectAsState().value,
+                        addToList = {
+                            emailViewModel.addToList(it)
+                            val newList = (viewModel.loggedUser.value?.userPreferences?.markers ?: emptyArray<String>()) + it
+                            viewModel.loggedUser.value?.userPreferences?.markers = newList
+                        },
+                        removeFromList = {
+                            emailViewModel.removeFromList(it)
+                            val newList = (viewModel.loggedUser.value?.userPreferences?.markers ?: emptyArray<String>()).filter {el -> el != it }
+                            viewModel.loggedUser.value?.userPreferences?.markers = newList.toTypedArray()
+                        },
+                    )
                 }
 
                 composable(
@@ -167,7 +221,13 @@ fun BodyContainer(
                     arguments = listOf(navArgument("emailId") { type = NavType.StringType })
                 ) {
                     activeScreen = "emailDetail"
-                    val element = emailViewModel.findById(it.arguments?.getString("emailId") ?: "")
+                    val emailId = it.arguments?.getString("emailId") ?: ""
+                    val element by emailViewModel.selectedEmail.collectAsState()
+
+                    LaunchedEffect(emailId) {
+                        emailViewModel.findById(emailId)
+                    }
+
                     val fallback = IEmail(
                         date = LocalDateTime.now(),
                         imageUrl = null,
@@ -184,36 +244,5 @@ fun BodyContainer(
                 }
             }
         }
-    }
-
-    if (sheetState.isVisible) {
-        ModalBottomSheet(
-            sheetState = sheetState,
-            onDismissRequest = { scope.launch { sheetState.hide() } },
-            shape = BottomSheetDefaults.ExpandedShape
-        ) {
-            NewEmailScreen(handleCloseModal)
-        }
-    }
-}
-
-
-@Composable
-fun Navbar(
-    modifier: Modifier = Modifier,
-    tonalElevation: Dp = BottomAppBarDefaults.ContainerElevation,
-    content: @Composable RowScope.() -> Unit
-) {
-    Surface(
-        color = Color.Transparent,
-        tonalElevation = tonalElevation,
-        modifier = modifier
-    ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-            content = content
-        )
     }
 }

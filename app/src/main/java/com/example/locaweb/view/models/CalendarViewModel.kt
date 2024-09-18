@@ -98,9 +98,6 @@ class CalendarViewModel(private val contentResolver: ContentResolver): ViewModel
 
             withContext(Dispatchers.IO) {
                 val uri = contentResolver.insert(CalendarContract.Events.CONTENT_URI, eventValues)
-
-                Log.d("Event URI", uri.toString())
-
             }
         }
     }

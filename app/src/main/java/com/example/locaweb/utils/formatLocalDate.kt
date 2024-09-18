@@ -26,12 +26,9 @@ fun formatLocalDate(localDate: LocalDateTime): String {
 
 @RequiresApi(Build.VERSION_CODES.O)
 fun formatLocalDate(localDate: LocalDate, withYear: Boolean): String {
-    val month = localDate.month.getDisplayName(TextStyle.FULL, Locale("pt", "BR"))
-    return "${localDate.dayOfMonth} de $month de ${localDate.year}"
-}
-
-@RequiresApi(Build.VERSION_CODES.O)
-fun formatLocalDate(localDate: LocalDateTime, withYear: Boolean): String {
+    if (!withYear) {
+        return formatLocalDate(localDate)
+    }
     val month = localDate.month.getDisplayName(TextStyle.FULL, Locale("pt", "BR"))
     return "${localDate.dayOfMonth} de $month de ${localDate.year}"
 }

@@ -9,7 +9,7 @@ data class IEmail(
     val sender: String,
     val subject: String,
     val date: LocalDateTime,
-    val content: String? = null,
+    var content: String? = null,
     val preview: String? = null,
     var isFavorite: Boolean,
     val markers: Array<String>? = emptyArray(),

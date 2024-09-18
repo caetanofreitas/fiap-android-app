@@ -133,7 +133,7 @@ fun EmailDetailScreen(goBack: () -> Unit, content: IEmail) {
         if (!content.content.isNullOrBlank()) {
             AndroidView(
                 factory = { TextView(it) },
-                update = { it.text = HtmlCompat.fromHtml(content.content, 0) },
+                update = { it.text = HtmlCompat.fromHtml(content.content ?: "", 0) },
             )
         }
     }

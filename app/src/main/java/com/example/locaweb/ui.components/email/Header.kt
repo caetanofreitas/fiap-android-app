@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,13 +29,20 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.size.Size
 import com.example.locaweb.R
+import com.example.locaweb.integrations.GetEmailsFilters
 import com.example.locaweb.utils.Debouncer
 import com.example.locaweb.view.models.EmailViewModel
+import kotlinx.coroutines.flow.StateFlow
 
 @Composable
 fun Header(
     profileImage: String,
-    viewModel: EmailViewModel,
+    searchFilter: (String) -> Unit,
+    markersList: State<List<String>>,
+    filterEmails: StateFlow<GetEmailsFilters>,
+    restartEmailFilter: () -> Unit,
+    filterEmailList: (GetEmailsFilters) -> Unit,
+    goToProfile: () -> Unit,
 ) {
     var text by remember { mutableStateOf("") }
     var showBottomSheet by remember { mutableStateOf(false) }
@@ -42,7 +50,7 @@ fun Header(
 
     fun handleInputChangeText(newText: String) {
         text = newText
-        debounceDispatcher.debounce { viewModel.filterBySearch(newText) }
+        debounceDispatcher.debounce { searchFilter(newText) }
     }
 
     FilterBottomSheet(
@@ -50,21 +58,34 @@ fun Header(
         onDismissRequest = {
             showBottomSheet = false
         },
-        viewModel = viewModel
+        myList = markersList,
+        filter = filterEmails,
+        restartState = restartEmailFilter,
+        filterList = filterEmailList,
     ) {
         Column(verticalArrangement = Arrangement.Top) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                AsyncImage(
-                    model = ImageRequest
-                        .Builder(LocalContext.current)
-                        .data(profileImage)
-                        .size(Size.ORIGINAL)
-                        .build(),
-                    contentDescription = "Profile",
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .size(32.dp)
-                )
+                Button(
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.Transparent
+                    ),
+                    contentPadding = PaddingValues(0.dp),
+                    shape = RoundedCornerShape(0f),
+                    modifier = Modifier.size(36.dp),
+                    onClick = { goToProfile() }
+                ) {
+                    AsyncImage(
+                        model = ImageRequest
+                            .Builder(LocalContext.current)
+                            .data(profileImage)
+                            .size(Size.ORIGINAL)
+                            .build(),
+                        contentDescription = "Profile",
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .size(36.dp)
+                    )
+                }
                 Image(
                     painter = painterResource(R.drawable.logo_locaweb),
                     contentDescription = null,
